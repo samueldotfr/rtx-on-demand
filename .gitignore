@@ -1,0 +1,57 @@
+# Local configuration (host-specific PCI addresses, paths, secrets)
+config/gpu.env
+config/*.local
+*.env
+!*.env.example
+.env
+.env.*
+!.env.example
+
+# Windows VM data and install media
+storage/
+*.img
+*.qcow2
+*.raw
+*.vhd
+*.vhdx
+*.iso
+*.vars
+*.rom
+*.mac
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.bak
+*.bak-*
+*.orig
+*.swp
+*~
+backup/
+backups/
+
+# Secrets and credentials of any kind
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+authorized_keys
+*_state.json
+credentials*
+secrets*
+*.kdbx
+
+# Logs, dumps, shell history, tooling
+*.log
+*.dmp
+*.core
+core.*
+.bash_history
+.claude/
+.vscode/
+.idea/
+.DS_Store

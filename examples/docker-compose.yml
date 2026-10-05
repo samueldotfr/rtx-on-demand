@@ -1,0 +1,63 @@
+# Example dockur/windows service with VFIO GPU + audio passthrough.
+# Sanitized and generic. Copy next to a filled-in ".env" (see .env.example).
+#
+# IMPORTANT: this container must only be started AFTER the GPU is parked on vfio-pci
+# (scripts/start-windows.sh does that). The device mapping below fails if /dev/vfio/<group>
+# does not exist yet.
+services:
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    environment:
+      VERSION: "11i"                    # Windows 11 IoT Enterprise LTSC 2024 (Evaluation ISO, en-US only). See docs/windows-ltsc.md
+      LANGUAGE: "English"
+      KEYBOARD: "${WINDOWS_KEYBOARD:-en-US}"
+      RAM_SIZE: "${WINDOWS_RAM:-16G}"
+      CPU_CORES: "${WINDOWS_CPU_CORES:-12}"
+      DISK_SIZE: "${WINDOWS_DISK:-512G}"    # sparse file, not preallocated
+      USERNAME: "${WINDOWS_USERNAME:?set WINDOWS_USERNAME in .env}"
+      PASSWORD: "${WINDOWS_PASSWORD:?set WINDOWS_PASSWORD in .env}"
+      # Reference build had 6 cores x 2 threads; adjust to your CPU. +topoext exposes SMT on AMD only.
+      # SMP: "12,sockets=1,dies=1,cores=6,threads=2"
+      # CPU_FLAGS: "+topoext"
+      #
+      # Extra QEMU arguments (one line):
+      #  - vfio-pci x2   : GPU (multifunction) + its HDMI audio function
+      #  - audiodev none : no host audio backend; we only need a Windows endpoint
+      #  - ich9-intel-hda + hda-output : emulated HDA codec -> "Speakers" endpoint for Sunshine to capture
+      ARGUMENTS: >-
+        -device vfio-pci,host=${GPU_PCI},multifunction=on
+        -device vfio-pci,host=${GPU_AUDIO_PCI}
+        -audiodev none,id=snd0
+        -device ich9-intel-hda,id=hda0,bus=pcie.0,addr=0x7
+        -device hda-output,bus=hda0.0,audiodev=snd0
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+      - /dev/vfio/vfio
+      - /dev/vfio/${VFIO_GROUP:?set VFIO_GROUP in .env}
+    cap_add:
+      - NET_ADMIN
+      - IPC_LOCK                  # VFIO pins all guest RAM
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      # Bind to a LAN address only. Never publish these to the internet.
+      - "${LAN_BIND_IP:?set LAN_BIND_IP in .env}:8006:8006"        # noVNC / web console (dockur)
+      - "${LAN_BIND_IP}:3389:3389/tcp"                             # RDP (optional, see docs/security.md)
+      - "${LAN_BIND_IP}:3389:3389/udp"
+      - "${LAN_BIND_IP}:2222:22/tcp"                               # OpenSSH in Windows (optional)
+      # Sunshine (default ports, base 47989): see docs/sunshine.md
+      - "${LAN_BIND_IP}:47984:47984/tcp"
+      - "${LAN_BIND_IP}:47989:47989/tcp"
+      - "${LAN_BIND_IP}:47990:47990/tcp"                           # Sunshine web UI (HTTPS)
+      - "${LAN_BIND_IP}:48010:48010/tcp"
+      - "${LAN_BIND_IP}:47998-48000:47998-48000/udp"
+      - "${LAN_BIND_IP}:48002:48002/udp"
+      - "${LAN_BIND_IP}:48010:48010/udp"
+    volumes:
+      - ./storage:/storage        # VM disk and firmware vars; back it up, never commit it
+    restart: "no"                 # on demand only: an automatic restart could start QEMU before VFIO is ready
+    stop_grace_period: 2m         # let Windows shut down cleanly before the GPU is handed back

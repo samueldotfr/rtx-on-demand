@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Illustrative settings for the Virtual Display Driver (VirtualDrivers / MikeTheTech).
+  The schema has changed between releases: compare with the vdd_settings.xml shipped with the
+  version you installed and only copy the values you need.
+  Declaring a mode here is NOT enough: the mode must also be ACTIVE in Windows
+  (Settings > Display > Advanced display). See docs/virtual-display.md.
+-->
+<vdd_settings>
+  <monitors>
+    <count>1</count>
+  </monitors>
+  <gpu>
+    <!-- Name of the GPU the virtual display should be created on, or "default". -->
+    <friendlyname>default</friendlyname>
+  </gpu>
+  <resolutions>
+    <resolution>
+      <width>1920</width>
+      <height>1080</height>
+      <refresh_rate>60</refresh_rate>
+    </resolution>
+    <resolution>
+      <width>2560</width>
+      <height>1440</height>
+      <refresh_rate>120</refresh_rate>
+    </resolution>
+    <!-- Mode used on our reference build -->
+    <resolution>
+      <width>5120</width>
+      <height>1440</height>
+      <refresh_rate>120</refresh_rate>
+    </resolution>
+  </resolutions>
+</vdd_settings>

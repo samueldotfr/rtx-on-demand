@@ -1,0 +1,26 @@
+# Illustrative Sunshine configuration (sunshine.conf in the Sunshine config directory on Windows).
+# Placeholders only. Key names and accepted values change between Sunshine releases:
+# check the documentation of the version you installed. Values here are NOT validated recommendations.
+
+sunshine_name = workstation
+
+# Which GPU / display to capture. Find valid values in the Sunshine log at startup
+# (it lists adapters and outputs). With a Virtual Display Driver, point output_name at the
+# virtual monitor and adapter_name at the passed-through NVIDIA GPU.
+adapter_name = NVIDIA GeForce RTX <your model>
+# output_name = <id from the Sunshine log>
+
+encoder = nvenc
+
+# Codec policy. See docs/sunshine.md: on our reference build AV1 worked best at 5120x1440,
+# H.264 failed above 4096 px width, HEVC decoded slowly on our particular client.
+# Values per Sunshine docs (0 = advertise none/auto-by-capability; check your version).
+# av1_mode = 2
+# hevc_mode = 2
+
+# Restrict the web UI to the LAN.
+origin_web_ui_allowed = lan
+# Do not forward ports automatically.
+upnp = disabled
+
+min_log_level = info
