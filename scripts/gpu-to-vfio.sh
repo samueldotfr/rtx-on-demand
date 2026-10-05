@@ -2,7 +2,7 @@
 # Linux -> VFIO: release the GPU from NVIDIA/snd_hda_intel and park it on vfio-pci.
 #   scripts/gpu-to-vfio.sh --check   guards only, read-only, no root needed (results are
 #                                    less complete without root: other users' processes are hidden)
-#   sudo scripts/gpu-to-vfio.sh      perform the transition (NOT persistent across reboot)
+#   scripts/gpu-to-vfio.sh           perform the transition (re-runs itself with sudo; NOT persistent across reboot)
 # Does not start Windows. Does not touch GRUB/initramfs/modprobe config.
 # On any failure it stops and prints the state. It never rolls back by itself.
 set -Eeuo pipefail
@@ -18,19 +18,20 @@ case "${1:-}" in
   *) die "unknown argument: $1" ;;
 esac
 
+if [ $CHECK = 0 ]; then refuse_if_mocked; ensure_root "$@"; fi
 load_config
-if [ $CHECK = 0 ]; then require_root; acquire_lock; else [ "$(id -u)" = 0 ] || warn "not root: guards are incomplete"; fi
+if [ $CHECK = 0 ]; then acquire_lock; else [ "$(id -u)" = 0 ] || warn "not root: guards are incomplete"; fi
 
 guards() {
   log "guards (read-only)"
-  check_device_ids || fail_state "PCI vendor:device IDs do not match EXPECT_GPU_ID / EXPECT_AUDIO_ID"
   [ "$(pci_driver "$GPU_PCI")" = "$GPU_LINUX_DRIVER" ] && [ "$(pci_driver "$GPU_AUDIO_PCI")" = "$AUDIO_LINUX_DRIVER" ] \
     || fail_state "GPU is not in the Linux state (expected $GPU_LINUX_DRIVER + $AUDIO_LINUX_DRIVER)"
   [ -z "$(qemu_pids gpu)" ] || fail_state "a QEMU process already references the GPU"
   ! vfio_group_held || fail_state "$(vfio_node) is already held"
   if command -v nvidia-smi >/dev/null 2>&1; then
     local apps
-    apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
+    apps="$(timeout 20 nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>&1)" \
+      || fail_state "nvidia-smi failed, cannot verify that no compute process uses the GPU: ${apps%%$'\n'*}"
     [ -z "$apps" ] || fail_state "compute processes are using the GPU: $apps"
   fi
   local busy; busy="$(gpu_node_holders | tr '\n' ' ')"

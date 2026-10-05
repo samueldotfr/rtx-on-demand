@@ -49,17 +49,42 @@ Install Docker Engine + Compose plugin from Docker's repository. The Windows con
 
 ## 6. Tools used by the scripts
 
-`bash`, `flock` (util-linux), `fuser` (`psmisc`), `lspci` (`pciutils`), `timeout` (coreutils), `docker`,
+`bash`, `sudo`, `flock` (util-linux), `fuser` (`psmisc`), `lspci` (`pciutils`), `timeout` (coreutils), `docker`,
 optionally `shellcheck` for development.
 
 ## 7. Configure this project
 
+**Simple case: nothing to configure for the GPU.**
+
 ```bash
-cp config/gpu.env.example config/gpu.env
-$EDITOR config/gpu.env          # PCI addresses, container name, compose dir
-sudo chown root:root config/gpu.env && sudo chmod 600 config/gpu.env   # it is sourced by root scripts
-scripts/status.sh               # read-only sanity check
-scripts/gpu-to-vfio.sh --check  # guards only
+scripts/status.sh               # read-only; shows what was auto-detected
+scripts/gpu-to-vfio.sh --check  # guards only, changes nothing
 ```
 
-Find your PCI addresses with `lspci -nn | grep -i nvidia`.
+Auto-detection (fail closed): exactly one NVIDIA display-class device, its audio function in the same
+slot, the IOMMU group from sysfs (must contain only those two functions), the single `dockurr/windows`
+container. If several candidates exist the scripts stop with an explicit error telling you which
+value to set.
+
+**The compose file.** Needed only to *create* the Windows container the first time (afterwards its path is
+read from Docker's labels, and `start-windows.sh` uses `docker start`). Provide it with a two-line file:
+
+```bash
+printf 'WINDOWS_COMPOSE="/path/to/docker-compose.yml"
+' > config/gpu.env
+```
+
+**Advanced case.** [config/gpu.env.example](../config/gpu.env.example) lists every override (explicit PCI
+addresses, container name, driver names, timeouts, CDI). The file is sourced by root scripts: keep it
+root-owned and not writable by others if you restrict who can run them.
+
+## 8. Optional: launchers in your home directory
+
+```bash
+install/install-user-commands.sh --dry-run   # show what would be installed
+install/install-user-commands.sh             # ~/start-windows.sh, ~/stop-windows.sh, ~/windows-status.sh
+```
+
+Each launcher is a one-line `exec` of the script in *this* clone (the path is detected at install time);
+it contains no configuration or logic. The installer never overwrites a file that is not one of its own
+launchers unless you pass `--force`, which first moves the old file to `<name>.bak-<timestamp>`.

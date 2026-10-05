@@ -73,12 +73,19 @@ be handed back to Linux while Windows/QEMU still holds it. Details: [docs/state-
 ## Usage (once installed)
 
 ```bash
-sudo scripts/start-windows.sh    # Linux -> VFIO if needed, start Windows, verify, print READY
-scripts/status.sh                # read-only
-sudo scripts/stop-windows.sh     # graceful stop, wait QEMU + VFIO, VFIO -> NVIDIA, verify
+scripts/start-windows.sh    # Linux -> VFIO if needed, start Windows, verify, print READY
+scripts/status.sh           # read-only, never asks for sudo
+scripts/stop-windows.sh     # graceful stop, wait QEMU + VFIO, VFIO -> NVIDIA, verify
 ```
 
-`--dry-run` on start/stop prints the plan and runs read-only guards.
+The start/stop scripts re-run themselves with `sudo` when root is needed. `--dry-run` prints the plan
+and runs read-only guards without changing anything. Optional launchers in your home directory:
+`install/install-user-commands.sh` installs `~/start-windows.sh`, `~/stop-windows.sh` and
+`~/windows-status.sh`; they just `exec` the scripts of the clone you installed them from.
+
+The start script never silently recreates the VM: a running Windows is left alone, an existing
+container is started with `docker start`, and the compose file is used only to create a container
+that does not exist yet (`--no-recreate`).
 
 ## Requirements (summary)
 
@@ -93,7 +100,10 @@ Full list and caveats: [docs/hardware-requirements.md](docs/hardware-requirement
 
 1. [Host setup](docs/host-setup.md): BIOS, kernel parameters, NVIDIA driver, Docker
 2. [IOMMU & VFIO](docs/iommu-and-vfio.md): verify groups, understand dynamic binding
-3. Copy `config/gpu.env.example` → `config/gpu.env`, edit; run `scripts/gpu-to-vfio.sh --check`
+3. Run `scripts/status.sh`: the GPU, its audio function and the IOMMU group are auto-detected.
+   No configuration file is needed unless detection is ambiguous (e.g. two NVIDIA GPUs). The only
+   value you provide is the path of the Windows compose file, until the container exists
+   (see [docs/host-setup.md](docs/host-setup.md); advanced overrides: [config/gpu.env.example](config/gpu.env.example))
 4. [Windows VM](docs/windows-vm.md) (+ [LTSC notes](docs/windows-ltsc.md)) using [examples/docker-compose.yml](examples/docker-compose.yml)
 5. [Virtual display](docs/virtual-display.md), [audio](docs/audio.md), [Sunshine](docs/sunshine.md), [gamepad](docs/gamepad.md)
 6. [Moonlight clients](docs/moonlight.md)

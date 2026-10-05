@@ -12,7 +12,7 @@
 | Host OS | Ubuntu 24.04 | **Ubuntu-specific** (commands, package names) |
 | Guest | Windows 11, Virtual Display Driver, Sunshine, ViGEmBus | Windows-specific |
 | Clients | Moonlight on Windows/Linux/TV | Generic |
-| Reference machine | PCI addresses, IOMMU group number, 5120x1440 mode, RAM/CPU sizing | **Reference-build only**, parameterized via `config/gpu.env` |
+| Reference machine | PCI addresses, IOMMU group number, 5120x1440 mode, RAM/CPU sizing | **Reference-build only**; auto-detected or overridable (`config/gpu.env`, optional) |
 
 ## Data paths
 

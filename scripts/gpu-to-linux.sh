@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # VFIO -> Linux: return the GPU to the NVIDIA and audio drivers, then verify.
 #   scripts/gpu-to-linux.sh --check   guards only (read-only)
-#   sudo scripts/gpu-to-linux.sh      perform the transition
+#   scripts/gpu-to-linux.sh           perform the transition (re-runs itself with sudo)
 # Refuses to run while the Windows container or any QEMU is alive or holds the VFIO group.
 set -Eeuo pipefail
 HGW_TAG=gpu-to-linux
@@ -16,15 +16,16 @@ case "${1:-}" in
   *) die "unknown argument: $1" ;;
 esac
 
+if [ $CHECK = 0 ]; then refuse_if_mocked; ensure_root "$@"; fi
 load_config
 need_docker
-if [ $CHECK = 0 ]; then require_root; acquire_lock; fi
+find_container || warn "$FIND_ERR (assuming no Windows container; the QEMU and VFIO guards still apply)"
+if [ $CHECK = 0 ]; then acquire_lock; fi
 
 not_held() { ! vfio_group_held; }
 
 guards() {
   log "guards (read-only)"
-  check_device_ids || fail_state "PCI vendor:device IDs do not match EXPECT_GPU_ID / EXPECT_AUDIO_ID"
   ! container_running || fail_state "Windows container '$WINDOWS_CONTAINER' is still running"
   [ -z "$(qemu_pids any)" ] || fail_state "a qemu-system process is still running"
   wait_until "$VFIO_RELEASE_WAIT" not_held || fail_state "$(vfio_node) still held after ${VFIO_RELEASE_WAIT}s"
@@ -48,6 +49,10 @@ regenerate_cdi() {
   nvidia-ctk cdi generate --output="$tmp" >/dev/null 2>&1 || { rm -f -- "$tmp"; fail_state "nvidia-ctk cdi generate failed"; }
   mv -- "$tmp" "$CDI_SPEC_PATH" || fail_state "could not install CDI spec"
   nvidia-ctk cdi list 2>/dev/null | grep -qx 'nvidia.com/gpu=all' || fail_state "CDI spec lacks nvidia.com/gpu=all"
+  if [ -d /var/run/cdi ] && [ -e /var/run/cdi/nvidia.yaml ]; then   # some setups also read a copy from /var/run/cdi
+    cp -- "$CDI_SPEC_PATH" /run/.nvidia-cdi-sync.tmp && mv -- /run/.nvidia-cdi-sync.tmp /var/run/cdi/nvidia.yaml \
+      || fail_state "could not refresh /var/run/cdi/nvidia.yaml"
+  fi
   log "CDI: spec regenerated"
 }
 

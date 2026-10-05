@@ -4,6 +4,12 @@
 
 HGW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# Test hook: HGW_FAKE_SYSFS points at a fake /sys tree so discovery and status logic can be tested
+# without hardware. Every script that MODIFIES anything refuses to run while it is set.
+SYSROOT="${HGW_FAKE_SYSFS:-/sys}"
+PCI_DIR="$SYSROOT/bus/pci/devices"
+IOMMU_DIR="$SYSROOT/kernel/iommu_groups"
+
 log()  { printf '[%s] %s\n' "${HGW_TAG:-hgw}" "$*"; }
 warn() { printf '[%s] WARNING: %s\n' "${HGW_TAG:-hgw}" "$*" >&2; }
 die()  { printf '[%s] ERROR: %s\n' "${HGW_TAG:-hgw}" "$*" >&2; exit 1; }
@@ -17,23 +23,43 @@ fail_state() {
   exit 1
 }
 
+refuse_if_mocked() { [ -z "${HGW_FAKE_SYSFS:-}" ] || die "HGW_FAKE_SYSFS is set (test mode): refusing to modify anything"; }
+
+# ---- privileges ---------------------------------------------------------------
+# ensure_root "$@": call from the top level of a script that must run as root, passing the script's
+# own arguments. Re-executes the SAME script through sudo. No loop is possible: the test is the EUID,
+# and HGW_REEXEC catches a sudo that "succeeds" without actually giving root.
+ensure_root() {
+  [ "$(id -u)" = 0 ] && return 0
+  [ -z "${HGW_REEXEC:-}" ] || die "still not root after sudo; refusing to loop"
+  command -v sudo >/dev/null 2>&1 || die "root is required and sudo was not found; re-run as root"
+  local self envs=("HGW_REEXEC=1")
+  self="$(readlink -f "${BASH_SOURCE[1]}")"
+  [ -z "${HGW_CONFIG:-}" ] || envs+=("HGW_CONFIG=$HGW_CONFIG")
+  log "root is required for this operation; re-running with sudo"
+  exec sudo "${envs[@]}" "$self" "$@"
+}
+
+# ---- configuration --------------------------------------------------------------
+# config/gpu.env is OPTIONAL. Every value below is auto-discovered unless overridden there.
+# The only value that cannot be discovered is the Windows compose file, and only when the Windows
+# container does not exist yet (an existing container carries its compose path in Docker labels).
 load_config() {
-  local cfg="${HGW_CONFIG:-$HGW_ROOT/config/gpu.env}"
-  [ -r "$cfg" ] || die "config not found: $cfg (copy config/gpu.env.example to config/gpu.env and edit it)"
+  local cfg="${HGW_CONFIG:-}"
+  if [ -n "$cfg" ]; then
+    [ -r "$cfg" ] || die "HGW_CONFIG points to an unreadable file: $cfg"
+  elif [ -r "$HGW_ROOT/config/gpu.env" ]; then cfg="$HGW_ROOT/config/gpu.env"; fi
   # shellcheck disable=SC1090
-  . "$cfg"
-  : "${GPU_PCI:?GPU_PCI is not set in $cfg}"
-  : "${GPU_AUDIO_PCI:?GPU_AUDIO_PCI is not set in $cfg}"
+  [ -z "$cfg" ] || . "$cfg"
+  GPU_PCI="${GPU_PCI:-}"
+  GPU_AUDIO_PCI="${GPU_AUDIO_PCI:-}"
   VFIO_GROUP="${VFIO_GROUP:-auto}"
-  EXPECT_GPU_ID="${EXPECT_GPU_ID:-}"
-  EXPECT_AUDIO_ID="${EXPECT_AUDIO_ID:-}"
   GPU_LINUX_DRIVER="${GPU_LINUX_DRIVER:-nvidia}"
   AUDIO_LINUX_DRIVER="${AUDIO_LINUX_DRIVER:-snd_hda_intel}"
-  WINDOWS_CONTAINER="${WINDOWS_CONTAINER:-windows}"
-  WINDOWS_COMPOSE_DIR="${WINDOWS_COMPOSE_DIR:-}"
-  WINDOWS_COMPOSE_FILE="${WINDOWS_COMPOSE_FILE:-docker-compose.yml}"
-  WINDOWS_SERVICE="${WINDOWS_SERVICE:-windows}"
-  PERSISTENCED_UNIT="${PERSISTENCED_UNIT:-nvidia-persistenced}"
+  WINDOWS_CONTAINER="${WINDOWS_CONTAINER:-}"
+  WINDOWS_COMPOSE="${WINDOWS_COMPOSE:-}"
+  WINDOWS_SERVICE="${WINDOWS_SERVICE:-}"
+  PERSISTENCED_UNIT="${PERSISTENCED_UNIT-nvidia-persistenced}"
   LOCK_FILE="${LOCK_FILE:-/run/hgw-gpu-transition.lock}"
   UNBIND_TIMEOUT="${UNBIND_TIMEOUT:-30}"
   STOP_TIMEOUT="${STOP_TIMEOUT:-180}"
@@ -42,16 +68,16 @@ load_config() {
   CDI_MODE="${CDI_MODE:-auto}"          # auto | off | on
   CDI_SPEC_PATH="${CDI_SPEC_PATH:-/etc/cdi/nvidia.yaml}"
   case "$GPU_PCI$GPU_AUDIO_PCI" in *[!0-9a-fA-F:.]*) die "invalid PCI address in config" ;; esac
-  [ -d "/sys/bus/pci/devices/$GPU_PCI" ] || die "PCI device $GPU_PCI not found"
-  [ -d "/sys/bus/pci/devices/$GPU_AUDIO_PCI" ] || die "PCI device $GPU_AUDIO_PCI not found"
+  discover_gpu
+  discover_audio
   resolve_group
 }
 
 # ---- sysfs helpers (read-only) ---------------------------------------------
-pci_driver()   { local l; l="$(readlink "/sys/bus/pci/devices/$1/driver" 2>/dev/null)" || true; echo "${l##*/}"; }
-pci_override() { cat "/sys/bus/pci/devices/$1/driver_override" 2>/dev/null || echo "?"; }
-pci_group()    { local l; l="$(readlink "/sys/bus/pci/devices/$1/iommu_group" 2>/dev/null)" || true; echo "${l##*/}"; }
-pci_ids()      { echo "$(cat "/sys/bus/pci/devices/$1/vendor"):$(cat "/sys/bus/pci/devices/$1/device")" | sed 's/0x//g'; }
+pci_driver()   { local l; l="$(readlink "$PCI_DIR/$1/driver" 2>/dev/null)" || true; echo "${l##*/}"; }
+pci_override() { cat "$PCI_DIR/$1/driver_override" 2>/dev/null || echo "?"; }
+pci_group()    { local l; l="$(readlink "$PCI_DIR/$1/iommu_group" 2>/dev/null)" || true; echo "${l##*/}"; }
+pci_attr()     { cat "$PCI_DIR/$1/$2" 2>/dev/null || true; }
 
 print_pci_state() {
   echo "  $GPU_PCI driver=$(pci_driver "$GPU_PCI") override=$(pci_override "$GPU_PCI")"
@@ -64,6 +90,43 @@ gpu_name() {
   echo "${n:-unknown}"
 }
 
+# GPU = the NVIDIA (vendor 0x10de) display-class (0x03xx) device. Exactly one, or an explicit GPU_PCI.
+discover_gpu() {
+  local d v c found=()
+  if [ -n "$GPU_PCI" ]; then
+    [ -d "$PCI_DIR/$GPU_PCI" ] || die "GPU_PCI=$GPU_PCI from config does not exist"
+    return 0
+  fi
+  for d in "$PCI_DIR"/*; do
+    v="$(pci_attr "${d##*/}" vendor)"; c="$(pci_attr "${d##*/}" class)"
+    [ "$v" = 0x10de ] || continue
+    case "$c" in 0x03*) found+=("${d##*/}") ;; esac
+  done
+  case "${#found[@]}" in
+    1) GPU_PCI="${found[0]}" ;;
+    0) die "no NVIDIA GPU found on the PCI bus. If your GPU is not NVIDIA, set GPU_PCI and GPU_AUDIO_PCI in config/gpu.env (untested)" ;;
+    *) die "several NVIDIA GPUs found (${found[*]}); cannot know which to use. Set GPU_PCI (and GPU_AUDIO_PCI) in config/gpu.env" ;;
+  esac
+}
+
+# Audio function = the NVIDIA audio-class (0x0403) function in the same slot as the GPU. Exactly one.
+discover_audio() {
+  local slot d found=()
+  [ -z "$GPU_AUDIO_PCI" ] || { [ -d "$PCI_DIR/$GPU_AUDIO_PCI" ] || die "GPU_AUDIO_PCI=$GPU_AUDIO_PCI from config does not exist"; return 0; }
+  slot="${GPU_PCI%.*}"
+  for d in "$PCI_DIR/$slot".*; do
+    [ -e "$d" ] || continue
+    [ "${d##*/}" != "$GPU_PCI" ] || continue
+    [ "$(pci_attr "${d##*/}" vendor)" = 0x10de ] || continue
+    case "$(pci_attr "${d##*/}" class)" in 0x0403*) found+=("${d##*/}") ;; esac
+  done
+  case "${#found[@]}" in
+    1) GPU_AUDIO_PCI="${found[0]}" ;;
+    0) die "no NVIDIA audio function found next to $GPU_PCI. Set GPU_AUDIO_PCI in config/gpu.env" ;;
+    *) die "several audio functions next to $GPU_PCI (${found[*]}); set GPU_AUDIO_PCI in config/gpu.env" ;;
+  esac
+}
+
 # Sets VFIO_GROUP to the real IOMMU group and checks it only contains the GPU functions.
 resolve_group() {
   local g1 g2 n
@@ -74,28 +137,76 @@ resolve_group() {
     die "VFIO_GROUP=$VFIO_GROUP in config but the device is in IOMMU group $g1"
   fi
   VFIO_GROUP="$g1"
-  n="$(find "/sys/kernel/iommu_groups/$VFIO_GROUP/devices" -mindepth 1 -maxdepth 1 | wc -l)"
+  n="$(find "$IOMMU_DIR/$VFIO_GROUP/devices" -mindepth 1 -maxdepth 1 | wc -l)"
   if [ "$n" != 2 ] && [ "${ALLOW_SHARED_GROUP:-0}" != 1 ]; then
     die "IOMMU group $VFIO_GROUP has $n devices (expected exactly the 2 GPU functions). Set ALLOW_SHARED_GROUP=1 only if you understand docs/iommu-and-vfio.md"
   fi
 }
 
-check_device_ids() {
-  [ -z "$EXPECT_GPU_ID" ]   || [ "$(pci_ids "$GPU_PCI")" = "$EXPECT_GPU_ID" ]         || return 1
-  [ -z "$EXPECT_AUDIO_ID" ] || [ "$(pci_ids "$GPU_AUDIO_PCI")" = "$EXPECT_AUDIO_ID" ] || return 1
-}
-
 # ---- docker / qemu ----------------------------------------------------------
-need_docker() { command -v docker >/dev/null 2>&1 || die "docker not found"; }
+docker_ok() { command -v docker >/dev/null 2>&1 && docker ps -q >/dev/null 2>&1; }
+need_docker() { docker_ok || die "cannot talk to docker (not installed, daemon down, or no permission)"; }
 
-container_running() {
-  [ "$(docker inspect -f '{{.State.Running}}' "$WINDOWS_CONTAINER" 2>/dev/null)" = true ]
+container_state() { # running | exited | created | paused | ... | absent
+  [ -n "$WINDOWS_CONTAINER" ] || { echo absent; return 0; }
+  docker inspect -f '{{.State.Status}}' "$WINDOWS_CONTAINER" 2>/dev/null || echo absent
+}
+container_running() { [ "$(container_state)" = running ]; }
+container_label() { docker inspect -f "{{index .Config.Labels \"$1\"}}" "$WINDOWS_CONTAINER" 2>/dev/null || true; }
+
+# Sets WINDOWS_CONTAINER (config override > the single dockurr/windows container > container_name in the compose file).
+# Returns 1 with FIND_ERR set when it cannot decide (callers choose to die or to report).
+find_container() {
+  local names=() n
+  FIND_ERR=""
+  [ -z "$WINDOWS_CONTAINER" ] || return 0
+  mapfile -t names < <(docker ps -a --filter ancestor=dockurr/windows --format '{{.Names}}' 2>/dev/null)
+  case "${#names[@]}" in
+    1) WINDOWS_CONTAINER="${names[0]}"; return 0 ;;
+    0) ;;
+    *) FIND_ERR="several dockurr/windows containers (${names[*]}); set WINDOWS_CONTAINER in config/gpu.env"; return 1 ;;
+  esac
+  if [ -n "$WINDOWS_COMPOSE" ] && [ -r "$WINDOWS_COMPOSE" ]; then
+    mapfile -t names < <(sed -n 's/^[[:space:]]*container_name:[[:space:]]*["'\'']\{0,1\}\([A-Za-z0-9_.-]*\).*/\1/p' "$WINDOWS_COMPOSE")
+    if [ "${#names[@]}" = 1 ] && [ -n "${names[0]}" ]; then WINDOWS_CONTAINER="${names[0]}"; return 0; fi
+    FIND_ERR="cannot read a single container_name from $WINDOWS_COMPOSE; set WINDOWS_CONTAINER in config/gpu.env"; return 1
+  fi
+  n="no Windows container found"
+  FIND_ERR="$n. Create it first, or set WINDOWS_COMPOSE=/path/to/docker-compose.yml in config/gpu.env"
+  return 1
+}
+require_container() { find_container || die "$FIND_ERR"; }
+
+compose_realpath() { readlink -f "$1" 2>/dev/null || echo "$1"; }
+
+# Compose file label of an existing container (empty if none).
+container_compose_label() { container_label com.docker.compose.project.config_files; }
+
+# Check an existing container was created from the configured compose file (only if one is configured).
+check_compose_label() {
+  local label want f ok=1
+  [ -n "$WINDOWS_COMPOSE" ] || return 0
+  label="$(container_compose_label)"
+  [ -n "$label" ] || die "container '$WINDOWS_CONTAINER' has no compose label but WINDOWS_COMPOSE is configured; refusing"
+  want="$(compose_realpath "$WINDOWS_COMPOSE")"
+  local IFS=,
+  for f in $label; do [ "$(compose_realpath "$f")" = "$want" ] && ok=0; done
+  [ $ok = 0 ] || die "container '$WINDOWS_CONTAINER' was not created from $WINDOWS_COMPOSE (label: $label); refusing"
 }
 
 compose() {
-  [ -n "$WINDOWS_COMPOSE_DIR" ] || die "WINDOWS_COMPOSE_DIR is not set in config"
-  [ -f "$WINDOWS_COMPOSE_DIR/$WINDOWS_COMPOSE_FILE" ] || die "compose file not found: $WINDOWS_COMPOSE_DIR/$WINDOWS_COMPOSE_FILE"
-  ( cd "$WINDOWS_COMPOSE_DIR" && docker compose -f "$WINDOWS_COMPOSE_FILE" "$@" )
+  [ -n "$WINDOWS_COMPOSE" ] || die "WINDOWS_COMPOSE is not set (needed only to create the container)"
+  [ -f "$WINDOWS_COMPOSE" ] || die "compose file not found: $WINDOWS_COMPOSE"
+  docker compose -f "$WINDOWS_COMPOSE" "$@"
+}
+
+# Service to create: config override > single service in the compose file.
+compose_service() {
+  local s=()
+  [ -z "$WINDOWS_SERVICE" ] || { echo "$WINDOWS_SERVICE"; return 0; }
+  mapfile -t s < <(compose config --services 2>/dev/null)
+  [ "${#s[@]}" = 1 ] || die "compose file defines ${#s[@]} services; set WINDOWS_SERVICE in config/gpu.env"
+  echo "${s[0]}"
 }
 
 # Prints PIDs of qemu-system processes. Mode "gpu" keeps only those referencing the GPU.
@@ -103,7 +214,7 @@ qemu_pids() {
   local f pid c
   for f in /proc/[0-9]*/cmdline; do
     pid="${f#/proc/}"; pid="${pid%%/*}"
-    c="$(tr '\0' ' ' < "$f" 2>/dev/null)" || continue
+    c="$({ tr '\0' ' ' < "$f"; } 2>/dev/null)" || continue   # process may vanish mid-scan
     case "$c" in qemu-system*) ;; *) continue ;; esac
     if [ "${1:-any}" = gpu ]; then
       case "$c" in *"host=$GPU_PCI"*) ;; *) continue ;; esac
@@ -114,7 +225,7 @@ qemu_pids() {
 
 vfio_node() { echo "/dev/vfio/$VFIO_GROUP"; }
 
-# 0 if some process holds the VFIO group node.
+# 0 if some process holds the VFIO group node. Without root, other users' holders are invisible.
 vfio_group_held() {
   [ -e "$(vfio_node)" ] || return 1
   command -v fuser >/dev/null 2>&1 || die "fuser not found (install psmisc)"
@@ -128,7 +239,7 @@ gpu_node_holders() {
   for n in /dev/nvidia[0-9]* /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset; do
     [ -e "$n" ] && nodes+=("$n")
   done
-  for n in "/sys/bus/pci/devices/$GPU_PCI"/drm/card* "/sys/bus/pci/devices/$GPU_PCI"/drm/renderD*; do
+  for n in "$PCI_DIR/$GPU_PCI"/drm/card* "$PCI_DIR/$GPU_PCI"/drm/renderD*; do
     [ -e "$n" ] && nodes+=("/dev/dri/${n##*/}")
   done
   [ "${#nodes[@]}" -gt 0 ] || return 0
@@ -139,7 +250,7 @@ gpu_node_holders() {
       case "$seen" in *" $pid "*) continue ;; esac
       seen="$seen$pid "
       comm="$(cat "/proc/$pid/comm" 2>/dev/null || echo '?')"
-      case "$comm" in "$PERSISTENCED_UNIT"*|nvidia-persiste*) continue ;; esac
+      case "$comm" in nvidia-persiste*) continue ;; esac
       echo "$pid:$comm"
     done
   done
@@ -166,9 +277,7 @@ detect_state() {
   fi
 }
 
-# ---- locking / privileges ---------------------------------------------------
-require_root() { [ "$(id -u)" = 0 ] || die "run as root (sudo) - GPU rebinding and docker need it"; }
-
+# ---- locking ------------------------------------------------------------------
 acquire_lock() {
   exec 9>"$LOCK_FILE" || die "cannot open lock file $LOCK_FILE"
   flock -n 9 || die "another GPU transition is in progress (lock: $LOCK_FILE)"

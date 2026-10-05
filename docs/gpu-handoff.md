@@ -18,8 +18,16 @@ List them with `sudo fuser -v /dev/nvidia*`.
 
 ## Start Windows
 
-Only from the VFIO-parked state. `start-windows.sh` does the transition above if needed, then `docker compose up -d`,
-then waits until the container runs **and** a QEMU process references the GPU.
+Only from the VFIO-parked state. `start-windows.sh` does the transition above if needed, then starts Windows:
+
+- container already running with the GPU → nothing to do (idempotent);
+- container exists → `docker start` (it keeps the devices, arguments and volumes it was created with; if a compose file is
+  configured, the container's compose label must match it or the script refuses);
+- container does not exist → `docker compose up -d --no-recreate` with the configured compose file;
+- any other container state (paused, restarting, dead...) → refuse.
+
+It then waits until the container runs **and** a QEMU process references the GPU. If anything fails after the GPU was parked, it
+says so and leaves it parked (no automatic rollback); `stop-windows.sh` returns it.
 
 ## Windows → Linux (`stop-windows.sh`, then `gpu-to-linux.sh`)
 

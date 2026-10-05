@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop the Windows workstation and give the GPU back to Linux.
-#   sudo scripts/stop-windows.sh
+#   scripts/stop-windows.sh            re-runs itself with sudo when needed
 #   scripts/stop-windows.sh --dry-run   show the plan only
 set -Eeuo pipefail
 HGW_TAG=stop-windows
@@ -16,9 +16,11 @@ case "${1:-}" in
   *) die "unknown argument: $1" ;;
 esac
 
+# Elevate BEFORE stopping Windows, so we never stop it and then fail on privileges.
+if [ $DRY = 0 ]; then refuse_if_mocked; ensure_root "$@"; fi
 load_config
 need_docker
-[ $DRY = 1 ] || require_root   # check BEFORE stopping Windows, so we never stop it and then fail on privileges
+find_container || warn "$FIND_ERR (assuming no Windows container)"
 
 detect_state
 log "current state: $STATE"
@@ -28,9 +30,10 @@ case "$STATE" in
 esac
 
 if [ $DRY = 1 ]; then
-  log "plan:"
-  [ "$STATE" = WINDOWS ] && log "  1. docker compose stop $WINDOWS_SERVICE (graceful, timeout ${STOP_TIMEOUT}s)"
-  log "  2. wait for QEMU to exit and $(vfio_node) to be released"
+  log "plan (nothing is changed):"
+  if [ "$STATE" = WINDOWS ]; then log "  1. docker stop -t ${STOP_TIMEOUT} $WINDOWS_CONTAINER (graceful), wait for QEMU to exit"
+  else log "  1. Windows is already stopped: nothing to stop"; fi
+  log "  2. wait for $(vfio_node) to be released"
   log "  3. gpu-to-linux.sh (VFIO -> NVIDIA), nvidia-smi, optional CDI"
   exit 0
 fi

@@ -1,7 +1,8 @@
 # Reference build
 
-The machine this was developed and validated on. Everything machine-specific lives in `config/gpu.env`;
-nothing below is required.
+The machine this was developed and validated on. Nothing below is required.
+The scripts auto-detect the GPU, audio function, IOMMU group and container; the only value that cannot be discovered is
+the compose file path (read from the container labels once the container exists).
 
 | Layer | Detail |
 |---|---|

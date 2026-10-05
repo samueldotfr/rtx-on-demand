@@ -14,7 +14,7 @@ This setup gives a network-reachable Windows VM direct hardware access. Treat it
 - Sunshine's web UI has its own admin account: set a strong password; keep `origin_web_ui_allowed = lan`.
 - Sunshine's config directory holds credentials and paired-client data: never share or commit it.
 - SSH into Windows: use keys, disable password authentication once it works.
-- `config/gpu.env` is sourced by root scripts: root-owned, mode 600.
+- `config/gpu.env` (optional) is sourced by the scripts **as root**: keep it root-owned and not writable by others.
 
 ## VFIO trust boundary
 
@@ -25,8 +25,11 @@ compromised guest: the host's Docker socket, storage and LAN are one exploit awa
 
 ## Host script privileges
 
-`start-windows.sh`/`stop-windows.sh` need root (sysfs writes, docker). If you wrap them in sudo rules or a
-web trigger, restrict the exact command; do not allow arbitrary arguments or config paths.
+`start-windows.sh`/`stop-windows.sh` need root (sysfs writes, docker) and re-run themselves through `sudo`.
+Anyone who can edit these scripts, `scripts/lib/common.sh` or the config file can run code as root through them:
+if you restrict `sudo` to specific commands or add a web trigger, make the clone root-owned and do not
+allow arbitrary arguments or config paths. `HGW_CONFIG` is forwarded through sudo, so do not allow it in a sudoers rule.
+The launchers installed in a home directory only `exec` the clone's scripts; the clone is the trust boundary.
 
 ## Repository hygiene
 
