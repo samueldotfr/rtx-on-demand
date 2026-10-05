@@ -16,6 +16,10 @@ The RTX does not belong to a gaming PC. It belongs to the homelab and is *reassi
 when nobody needs Windows, Linux has the GPU; when someone wants Photoshop or a game, the GPU is
 handed to a Windows VM, and handed back afterwards.
 
+**RTX on Demand.** The RTX normally belongs to the Linux server and serves CUDA, local AI, rendering or transcoding.
+On demand it is assigned to a headless Windows workstation for gaming, creative work, Windows CUDA/RTX applications and
+Sunshine/Moonlight streaming, then returns to Linux when Windows stops.
+
 **What this is, and is not.** It is not a new VFIO technique. It is a reproducible *assembly* of existing,
 well-known pieces (VFIO, `driver_override`, dockur/windows, a virtual display, Sunshine/Moonlight) around one idea: the
 RTX normally belongs to the Linux server (CUDA, local AI, rendering, transcoding) and is handed to a headless Windows VM
@@ -76,22 +80,37 @@ stateDiagram-v2
 Windows must **never** be started before the GPU is available to VFIO, and the GPU must **never**
 be handed back to Linux while Windows/QEMU still holds it. Details: [docs/state-machine.md](docs/state-machine.md).
 
-## Usage (once installed)
+## Usage
 
 ```bash
-scripts/start-windows.sh    # Linux -> VFIO if needed, start Windows, verify, print READY
-scripts/status.sh           # read-only, never asks for sudo
-scripts/stop-windows.sh     # graceful stop, wait QEMU + VFIO, VFIO -> NVIDIA, verify
+git clone <this repository>
+cd homelab-gpu-workstation
+./install/install-user-commands.sh      # optional: puts three launchers in your home directory
 ```
 
-The start/stop scripts re-run themselves with `sudo` when root is needed. `--dry-run` prints the plan
-and runs read-only guards without changing anything. Optional launchers in your home directory:
-`install/install-user-commands.sh` installs `~/start-windows.sh`, `~/stop-windows.sh` and
-`~/windows-status.sh`; they just `exec` the scripts of the clone you installed them from.
+Daily use:
 
-The start script never silently recreates the VM: a running Windows is left alone, an existing
-container is started with `docker start`, and the compose file is used only to create a container
-that does not exist yet (`--no-recreate`).
+```bash
+~/windows-status.sh    # read-only: who owns the GPU right now? never asks for sudo
+~/start-windows.sh     # RTX -> Windows: Linux -> VFIO if needed, start Windows, verify, print READY
+~/stop-windows.sh      # Windows -> RTX: graceful stop, wait QEMU + VFIO, VFIO -> NVIDIA, verify
+```
+
+The three commands are **launchers**: each one is a single `exec` of the matching script in the clone
+(`scripts/start-windows.sh`, `scripts/stop-windows.sh`, `scripts/status.sh`), forwarding all arguments and the
+exit code. They contain no GPU, Docker or configuration logic, and the clone location is detected when you run the
+installer. **The clone stays the single source of truth**: update it with `git pull`, nothing to reinstall unless you
+move it (then re-run the installer).
+
+The installer never overwrites a file that is not one of its own launchers. If you already have a script with the same
+name it stops; with `--force` it first makes a verified, timestamped copy (`<name>.bak-<date>`), then replaces it.
+`--dry-run` shows what would happen. You can also run the scripts directly from `scripts/`.
+
+The start/stop scripts re-run themselves with `sudo` when root is needed. `--dry-run` prints the plan and runs
+read-only guards without changing anything.
+
+The start script never silently recreates the VM: a running Windows is left alone, an existing container is started with
+`docker start`, and the compose file is used only to create a container that does not exist yet (`--no-recreate`).
 
 ## Requirements (summary)
 
@@ -113,6 +132,7 @@ Full list and caveats: [docs/hardware-requirements.md](docs/hardware-requirement
 4. [Windows VM](docs/windows-vm.md) (+ [LTSC notes](docs/windows-ltsc.md)) using [examples/docker-compose.yml](examples/docker-compose.yml)
 5. [Virtual display](docs/virtual-display.md), [audio](docs/audio.md), [Sunshine](docs/sunshine.md), [gamepad](docs/gamepad.md)
 6. [Moonlight clients](docs/moonlight.md)
+7. Run `install/install-user-commands.sh` for the three home launchers (see [Usage](#usage))
 
 ## Reference build results
 
@@ -163,7 +183,7 @@ More in [docs/performance.md](docs/performance.md) and [docs/reference-build.md]
 
 ## Project status
 
-Early (v0.1). Works on one reference machine. Static and mock tests (`tests/`, no hardware needed) pass; the repo scripts have not yet been validated end-to-end on real hardware. Untested: Intel hosts, AMD GPUs, other distros,
+Early (v0.1). Works on one reference machine. The scripts are in daily use on the reference machine (maintainer-reported), and hardware-free mock tests (`tests/`) pass. The reboot/crash matrix is still incomplete. Untested: Intel hosts, AMD GPUs, other distros,
 other gamepads, reboot/crash matrix, multi-GPU hosts. See [docs/known-issues.md](docs/known-issues.md).
 
 ## License
