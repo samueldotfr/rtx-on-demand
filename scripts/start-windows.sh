@@ -21,7 +21,7 @@ case "${1:-}" in
   *) die "unknown argument: $1" ;;
 esac
 
-if [ $DRY = 0 ]; then refuse_if_mocked; ensure_root "$@"; fi
+if [ $DRY = 0 ]; then ensure_root "$@"; fi
 load_config
 need_docker
 require_container
@@ -33,7 +33,7 @@ summary() {
   echo "GPU driver: $(pci_driver "$GPU_PCI") / audio: $(pci_driver "$GPU_AUDIO_PCI")"
   echo "VFIO group: $VFIO_GROUP ($(vfio_node) $([ -e "$(vfio_node)" ] && echo present || echo ABSENT))"
   echo "Windows container: $WINDOWS_CONTAINER ($(container_state))"
-  echo "QEMU passthrough: $([ -n "$(qemu_pids gpu)" ] && echo active || echo 'NOT CONFIRMED')"
+  echo "QEMU passthrough: $([ -n "$(qemu_full_pids)" ] && echo active || echo 'NOT CONFIRMED')"
 }
 
 detect_state
@@ -67,6 +67,7 @@ if [ $DRY = 1 ]; then
   exit 0
 fi
 
+refuse_if_mocked   # everything below modifies the system
 if [ "$STATE" = LINUX ]; then
   "$DIR/gpu-to-vfio.sh" || die "Linux -> VFIO failed; Windows NOT started"
   detect_state
@@ -99,7 +100,7 @@ else
   docker start "$WINDOWS_CONTAINER" >/dev/null
 fi
 
-up() { container_running && [ -n "$(qemu_pids gpu)" ]; }
+up() { container_running && [ -n "$(qemu_full_pids)" ]; }
 wait_until 60 up || die "container not running or QEMU not referencing the GPU after 60s (docker logs $WINDOWS_CONTAINER)"
 sleep 3
 up || die "Windows stopped right after starting (docker logs $WINDOWS_CONTAINER)"

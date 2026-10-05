@@ -16,6 +16,12 @@ The RTX does not belong to a gaming PC. It belongs to the homelab and is *reassi
 when nobody needs Windows, Linux has the GPU; when someone wants Photoshop or a game, the GPU is
 handed to a Windows VM, and handed back afterwards.
 
+**What this is, and is not.** It is not a new VFIO technique. It is a reproducible *assembly* of existing,
+well-known pieces (VFIO, `driver_override`, dockur/windows, a virtual display, Sunshine/Moonlight) around one idea: the
+RTX normally belongs to the Linux server (CUDA, local AI, rendering, transcoding) and is handed to a headless Windows VM
+**on demand**, then handed back when Windows stops. The contribution is the guarded handoff, the documented state
+machine, and the field notes.
+
 > ⚠️ **This is an advanced homelab / VFIO project. It is not one-click.** You will edit kernel
 > parameters, rebind PCI devices as root, and debug a Windows VM. A wrong step can hang the host
 > until reboot. Read [docs/security.md](docs/security.md) and the warnings below first.
@@ -157,7 +163,7 @@ More in [docs/performance.md](docs/performance.md) and [docs/reference-build.md]
 
 ## Project status
 
-Early (v0.1). Works on one reference machine. Untested: Intel hosts, AMD GPUs, other distros,
+Early (v0.1). Works on one reference machine. Static and mock tests (`tests/`, no hardware needed) pass; the repo scripts have not yet been validated end-to-end on real hardware. Untested: Intel hosts, AMD GPUs, other distros,
 other gamepads, reboot/crash matrix, multi-GPU hosts. See [docs/known-issues.md](docs/known-issues.md).
 
 ## License

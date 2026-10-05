@@ -7,6 +7,7 @@ HGW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Test hook: HGW_FAKE_SYSFS points at a fake /sys tree so discovery and status logic can be tested
 # without hardware. Every script that MODIFIES anything refuses to run while it is set.
 SYSROOT="${HGW_FAKE_SYSFS:-/sys}"
+PROC_DIR="${HGW_FAKE_PROC:-/proc}"      # same idea for /proc (process scans)
 PCI_DIR="$SYSROOT/bus/pci/devices"
 IOMMU_DIR="$SYSROOT/kernel/iommu_groups"
 
@@ -23,7 +24,9 @@ fail_state() {
   exit 1
 }
 
-refuse_if_mocked() { [ -z "${HGW_FAKE_SYSFS:-}" ] || die "HGW_FAKE_SYSFS is set (test mode): refusing to modify anything"; }
+refuse_if_mocked() {
+  [ -z "${HGW_FAKE_SYSFS:-}${HGW_FAKE_PROC:-}" ] || die "HGW_FAKE_SYSFS/HGW_FAKE_PROC is set (test mode): refusing to modify anything"
+}
 
 # ---- privileges ---------------------------------------------------------------
 # ensure_root "$@": call from the top level of a script that must run as root, passing the script's
@@ -209,19 +212,34 @@ compose_service() {
   echo "${s[0]}"
 }
 
-# Prints PIDs of qemu-system processes. Mode "gpu" keeps only those referencing the GPU.
+# Prints PIDs of qemu-system processes. Modes:
+#   any  - every qemu-system process
+#   gpu  - those referencing the GPU OR its audio function (orphan / guard checks)
+#   full - those referencing BOTH functions (passthrough confirmed)
+# A process that exits between listing and reading is ignored (normal race). A process that still
+# exists but whose cmdline cannot be read is reported as "unreadable:<pid>" (never silently dropped),
+# so callers treat it as "a QEMU may be present" and fail closed. These PIDs are only used for
+# decisions, never for signalling.
 qemu_pids() {
-  local f pid c
-  for f in /proc/[0-9]*/cmdline; do
-    pid="${f#/proc/}"; pid="${pid%%/*}"
-    c="$({ tr '\0' ' ' < "$f"; } 2>/dev/null)" || continue   # process may vanish mid-scan
-    case "$c" in qemu-system*) ;; *) continue ;; esac
-    if [ "${1:-any}" = gpu ]; then
-      case "$c" in *"host=$GPU_PCI"*) ;; *) continue ;; esac
+  local mode="${1:-any}" f pid c
+  for f in "$PROC_DIR"/[0-9]*/cmdline; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    pid="${f#"$PROC_DIR"/}"; pid="${pid%%/*}"
+    if ! c="$({ tr '\0' ' ' < "$f"; } 2>/dev/null)"; then
+      [ -d "$PROC_DIR/$pid" ] || continue
+      warn "cannot read $f although the process exists; cannot rule out a QEMU process"
+      echo "unreadable:$pid"; continue
     fi
+    case "$c" in qemu-system*) ;; *) continue ;; esac
+    case "$mode" in
+      gpu)  qemu_refs "$c" "$GPU_PCI" || qemu_refs "$c" "$GPU_AUDIO_PCI" || continue ;;
+      full) qemu_refs "$c" "$GPU_PCI" && qemu_refs "$c" "$GPU_AUDIO_PCI" || continue ;;
+    esac
     echo "$pid"
   done
 }
+qemu_refs() { case "$1" in *"host=$2 "*|*"host=$2,"*) return 0 ;; *) return 1 ;; esac; }   # $1 = cmdline with NULs as spaces
+qemu_full_pids() { qemu_pids full | grep -v '^unreadable:' || true; }
 
 vfio_node() { echo "/dev/vfio/$VFIO_GROUP"; }
 
@@ -249,7 +267,7 @@ gpu_node_holders() {
       pid="${pid//[!0-9]/}"; [ -n "$pid" ] || continue
       case "$seen" in *" $pid "*) continue ;; esac
       seen="$seen$pid "
-      comm="$(cat "/proc/$pid/comm" 2>/dev/null || echo '?')"
+      comm="$(cat "$PROC_DIR/$pid/comm" 2>/dev/null)" || { [ -d "$PROC_DIR/$pid" ] || continue; comm='?'; }   # vanished pid: ignore
       case "$comm" in nvidia-persiste*) continue ;; esac
       echo "$pid:$comm"
     done
@@ -257,19 +275,22 @@ gpu_node_holders() {
 }
 
 # ---- state machine ----------------------------------------------------------
-# Sets STATE in {LINUX, VFIO_PARKED, WINDOWS, INCONSISTENT} and STATE_REASON.
+# Sets STATE in {LINUX, VFIO_PARKED, WINDOWS, INCONSISTENT} and STATE_REASON (read by the callers).
+# shellcheck disable=SC2034
 detect_state() {
-  local gd ad win=0 qemu=0
+  local gd ad win=0 qemu=0 qfull=0
   gd="$(pci_driver "$GPU_PCI")"; ad="$(pci_driver "$GPU_AUDIO_PCI")"
   container_running && win=1
   [ -n "$(qemu_pids gpu)" ] && qemu=1
+  [ -n "$(qemu_full_pids)" ] && qfull=1
   STATE=INCONSISTENT; STATE_REASON="drivers: GPU='${gd:-none}' audio='${ad:-none}'"
   if [ "$gd" = "$GPU_LINUX_DRIVER" ] && [ "$ad" = "$AUDIO_LINUX_DRIVER" ]; then
     if [ $win = 1 ] || [ $qemu = 1 ]; then
       STATE_REASON="Windows/QEMU is running while the GPU is bound to Linux drivers"
     else STATE=LINUX; STATE_REASON=""; fi
   elif [ "$gd" = vfio-pci ] && [ "$ad" = vfio-pci ]; then
-    if [ $win = 1 ] && [ $qemu = 1 ]; then STATE=WINDOWS; STATE_REASON=""
+    if [ $win = 1 ] && [ $qfull = 1 ]; then STATE=WINDOWS; STATE_REASON=""
+    elif [ $win = 1 ] && [ $qemu = 1 ]; then STATE_REASON="QEMU does not reference BOTH the GPU and its audio function (or a QEMU cmdline is unreadable)"
     elif [ $win = 1 ]; then STATE_REASON="Windows container running but no QEMU references the GPU"
     elif [ $qemu = 1 ]; then STATE_REASON="QEMU references the GPU but the Windows container is not running"
     elif vfio_group_held; then STATE_REASON="$(vfio_node) is held by an unknown process"

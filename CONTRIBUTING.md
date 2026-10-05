@@ -19,6 +19,8 @@ Thanks for helping. This is an advanced homelab project; the most valuable contr
 - Every transition needs guards before and postconditions after.
 - Run `bash -n scripts/*.sh scripts/lib/*.sh` and `shellcheck scripts/*.sh scripts/lib/*.sh`.
 - `scripts/status.sh` must stay strictly read-only.
+- Run `tests/test-mocks.sh` and `tests/test-installer.sh` (hardware-free; temp dirs only).
+- Scans of `/proc` must ignore a PID that exits mid-scan but must not silently drop a process that exists and cannot be read.
 - Do not hard-code PCI addresses, IOMMU groups, paths or names; they are auto-discovered (fail closed when ambiguous) or come from the optional `config/gpu.env` overrides.
 - Scripts that modify anything must call `refuse_if_mocked` and `ensure_root "$@"`; `--dry-run`/`--check` must have no side effects. Test discovery logic with `HGW_FAKE_SYSFS` (a fake sysfs tree) and a fake `docker` in `PATH`, never on live hardware.
 

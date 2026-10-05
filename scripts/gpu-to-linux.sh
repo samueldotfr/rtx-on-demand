@@ -63,6 +63,7 @@ T0=$(date +%s)
 log "unbinding vfio-pci and clearing driver_override"
 for d in "$GPU_PCI" "$GPU_AUDIO_PCI"; do
   if [ -e "/sys/bus/pci/devices/$d/driver" ]; then
+    # shellcheck disable=SC2016  # $1 is expanded by the inner sh on purpose (argument, not interpolation)
     timeout "$UNBIND_TIMEOUT" sh -c 'echo "$1" > "/sys/bus/pci/devices/$1/driver/unbind"' _ "$d" \
       || fail_state "unbind of $d failed or timed out"
   fi

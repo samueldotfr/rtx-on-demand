@@ -17,7 +17,7 @@ case "${1:-}" in
 esac
 
 # Elevate BEFORE stopping Windows, so we never stop it and then fail on privileges.
-if [ $DRY = 0 ]; then refuse_if_mocked; ensure_root "$@"; fi
+if [ $DRY = 0 ]; then ensure_root "$@"; fi
 load_config
 need_docker
 find_container || warn "$FIND_ERR (assuming no Windows container)"
@@ -38,6 +38,7 @@ if [ $DRY = 1 ]; then
   exit 0
 fi
 
+refuse_if_mocked   # everything below modifies the system
 stopped() { ! container_running && [ -z "$(qemu_pids any)" ]; }
 
 if [ "$STATE" = WINDOWS ]; then

@@ -15,7 +15,8 @@ elif find_container; then WIN="$(container_state)"
 else WIN="not found"; NOTES+=("$FIND_ERR"); fi
 
 detect_state
-QEMU=inactive; [ -n "$(qemu_pids gpu)" ] && QEMU=active
+QEMU=inactive; [ -n "$(qemu_full_pids)" ] && QEMU=active
+[ "$QEMU" = active ] || [ -z "$(qemu_pids gpu)" ] || QEMU="partial or unreadable (see State)"
 if [ "$(id -u)" != 0 ]; then NOTES+=("not root: processes of other users holding $(vfio_node) cannot be seen"); fi
 
 echo "Homelab GPU Workstation"
