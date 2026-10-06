@@ -67,16 +67,17 @@ for d in "$GPU_PCI" "$GPU_AUDIO_PCI"; do
     timeout "$UNBIND_TIMEOUT" sh -c 'echo "$1" > "/sys/bus/pci/devices/$1/driver/unbind"' _ "$d" \
       || fail_state "unbind of $d failed or timed out"
   fi
-  : > "/sys/bus/pci/devices/$d/driver_override"
+  pci_clear_override "$d" || fail_state "could not write driver_override of $d"
+done
+# Verify BEFORE reprobing: with an override still set, the probe would just rebind vfio-pci.
+for d in "$GPU_PCI" "$GPU_AUDIO_PCI"; do
+  [ "$(pci_override "$d")" = "(null)" ] || fail_state "driver_override of $d is still '$(pci_override "$d")' after clearing; NOT reprobing"
 done
 log "reprobing"
 echo "$GPU_PCI" > /sys/bus/pci/drivers_probe
 echo "$GPU_AUDIO_PCI" > /sys/bus/pci/drivers_probe
 lsmod | grep -q "^${GPU_LINUX_DRIVER} " || modprobe "$GPU_LINUX_DRIVER" || fail_state "modprobe $GPU_LINUX_DRIVER"
 wait_until "$NVIDIA_RETURN_WAIT" gpu_back || fail_state "drivers did not come back (expected $GPU_LINUX_DRIVER + $AUDIO_LINUX_DRIVER)"
-for d in "$GPU_PCI" "$GPU_AUDIO_PCI"; do
-  [ "$(pci_override "$d")" = "(null)" ] || fail_state "driver_override still set on $d"
-done
 if [ -n "$PERSISTENCED_UNIT" ] && systemctl cat "$PERSISTENCED_UNIT" >/dev/null 2>&1; then
   systemctl start "$PERSISTENCED_UNIT" || fail_state "could not start $PERSISTENCED_UNIT"
   sleep 2

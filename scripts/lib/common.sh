@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for homelab-gpu-workstation scripts. Source this file, do not execute it.
+# Shared helpers for RTX on Demand scripts. Source this file, do not execute it.
 # shellcheck shell=bash
 
 HGW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -81,6 +81,13 @@ pci_driver()   { local l; l="$(readlink "$PCI_DIR/$1/driver" 2>/dev/null)" || tr
 pci_override() { cat "$PCI_DIR/$1/driver_override" 2>/dev/null || echo "?"; }
 pci_group()    { local l; l="$(readlink "$PCI_DIR/$1/iommu_group" 2>/dev/null)" || true; echo "${l##*/}"; }
 pci_attr()     { cat "$PCI_DIR/$1/$2" 2>/dev/null || true; }
+
+# Write to a sysfs attribute. A sysfs attribute only reacts to a write(2) call. `: > attr` opens the
+# file with O_TRUNC and writes NOTHING, so it does NOT clear driver_override (a regular file would
+# be emptied, which is exactly why mocks cannot catch this). To clear it, write a bare newline.
+sysfs_write() { printf '%s\n' "$2" > "$1"; }                       # <path> <value>; "" writes just "\n"
+pci_set_override()   { sysfs_write "$PCI_DIR/$1/driver_override" "$2"; }
+pci_clear_override() { sysfs_write "$PCI_DIR/$1/driver_override" ""; }
 
 print_pci_state() {
   echo "  $GPU_PCI driver=$(pci_driver "$GPU_PCI") override=$(pci_override "$GPU_PCI")"

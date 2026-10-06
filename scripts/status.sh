@@ -19,8 +19,8 @@ QEMU=inactive; [ -n "$(qemu_full_pids)" ] && QEMU=active
 [ "$QEMU" = active ] || [ -z "$(qemu_pids gpu)" ] || QEMU="partial or unreadable (see State)"
 if [ "$(id -u)" != 0 ]; then NOTES+=("not root: processes of other users holding $(vfio_node) cannot be seen"); fi
 
-echo "Homelab GPU Workstation"
-echo "-----------------------"
+echo "RTX on Demand"
+echo "-------------"
 echo "GPU: $(gpu_name) ($GPU_PCI, audio $GPU_AUDIO_PCI)"
 echo "GPU driver: $(pci_driver "$GPU_PCI")"
 echo "Audio driver: $(pci_driver "$GPU_AUDIO_PCI")"

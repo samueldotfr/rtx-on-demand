@@ -40,7 +40,7 @@ driver may bind on the next probe. The recipe the scripts use:
 2. write the address to the current driver's `unbind`
 3. write the address to `/sys/bus/pci/drivers_probe` → `vfio-pci` binds
 
-Reverse: unbind, clear `driver_override` (empty write), `drivers_probe` → `nvidia` / `snd_hda_intel` bind.
+Reverse: unbind, clear `driver_override` (write a bare newline: `echo > driver_override`; `: > driver_override` does **not** work, it sends no write to sysfs), verify it reads back `(null)`, then `drivers_probe` → `nvidia` / `snd_hda_intel` bind.
 
 ### Why not `vfio-pci.ids=` at boot?
 

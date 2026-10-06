@@ -99,6 +99,28 @@ S4="$T/sys4"; mk_sys "$S4" 0 0 vfio-pci vfio-pci
 run HGW_FAKE_SYSFS="$S4" HGW_FAKE_PROC="$P" -- "$ROOT/scripts/status.sh"
 check "no NVIDIA GPU: fail closed" has "no NVIDIA GPU"
 
+echo "== sysfs write semantics (regression: first real VFIO->Linux left driver_override set) =="
+# A sysfs attribute only reacts to write(2); `: > attr` opens with O_TRUNC and writes nothing. A regular
+# file cannot show this difference (O_TRUNC empties it), so the fake attribute here is a FIFO: the reader
+# receives bytes ONLY if the writer really called write().
+FS="$T/fifofs"; ATTR="$FS/bus/pci/devices/0000:09:00.0/driver_override"; mkdir -p "$(dirname "$ATTR")"; mkfifo "$ATTR"
+fifo_recv() { # <shell code run against the fifo>; prints received bytes as hex
+  : > "$T/recv"; cat "$ATTR" > "$T/recv" & local r=$!
+  timeout 5 env HGW_FAKE_SYSFS="$FS" bash -c "$1" >/dev/null 2>&1
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$r" 2>/dev/null || break; sleep 0.1; done
+  kill "$r" 2>/dev/null; wait "$r" 2>/dev/null     # a writer that never opened the FIFO must not hang the test
+  od -An -c "$T/recv" | tr -d ' \n'
+}
+check "control: the OLD form ': > attr' delivers NOTHING to the attribute (harness discriminates)" test "$(fifo_recv ": > '$ATTR'")" = ""
+check "control: 'echo > attr' delivers a newline" test "$(fifo_recv "echo > '$ATTR'")" = '\n'
+check "pci_clear_override delivers a bare newline (this is what clears driver_override)" test "$(fifo_recv ". '$ROOT/scripts/lib/common.sh'; pci_clear_override 0000:09:00.0")" = '\n'
+check "pci_set_override delivers 'vfio-pci' + newline" test "$(fifo_recv ". '$ROOT/scripts/lib/common.sh'; pci_set_override 0000:09:00.0 vfio-pci")" = 'vfio-pci\n'
+no_colon_redirect() { ! cat "$ROOT"/scripts/*.sh "$ROOT"/scripts/lib/*.sh | grep -nE '(^|[;&|])[[:space:]]*:[[:space:]]*>'; }
+check "no script uses the no-write ': > file' form (it cannot clear a sysfs attribute)" no_colon_redirect
+check "gpu-to-linux.sh clears the override through pci_clear_override" grep -q 'pci_clear_override "\$d"' "$ROOT/scripts/gpu-to-linux.sh"
+check "gpu-to-linux.sh verifies the override is cleared BEFORE reprobing" bash -c "awk '/still .* after clearing/{v=NR} /drivers_probe/{p=NR; exit} END{exit !(v && v<p)}' '$ROOT/scripts/gpu-to-linux.sh'"
+echo "NOTE: mocks cannot validate hardware state transitions; see CONTRIBUTING.md."
+
 echo "== WINDOWS -> start-windows -> WINDOWS (idempotence, fake root, no mutation) =="
 PW="$T/procw"; mkdir -p "$PW"
 mk_proc "$PW" 200 qemu-system-x86_64 -device vfio-pci,host=0000:01:00.0,multifunction=on -device vfio-pci,host=0000:01:00.1

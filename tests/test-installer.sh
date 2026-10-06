@@ -32,6 +32,16 @@ before="$(cat "$H"/*.sh | md5sum)"; "$INST" --dest "$H" >/dev/null 2>&1; rc=$?
 check "exit 0, content identical" test "$rc" = 0 -a "$before" = "$(cat "$H"/*.sh | md5sum)"
 check "no backup created for our own launchers" bash -c "! ls '$H'/*.bak-* >/dev/null 2>&1"
 
+echo "== launcher from before the rename (legacy marker) =="
+H5="$T/home5"; mkdir -p "$H5"
+for n in start-windows.sh stop-windows.sh windows-status.sh; do
+  printf '#!/usr/bin/env bash\n# homelab-gpu-workstation launcher\nexec /old/path/scripts/x.sh "$@"\n' > "$H5/$n"; chmod 755 "$H5/$n"
+done
+"$INST" --dest "$H5" >/dev/null 2>&1; rc=$?
+check "replaced without --force (exit 0)" test "$rc" = 0
+check "no backup created for legacy launchers" bash -c "! ls '$H5'/*.bak-* >/dev/null 2>&1"
+check "new marker and new target, old path gone" bash -c "grep -qxF '# rtx-on-demand launcher' '$H5/start-windows.sh' && ! grep -q /old/path '$H5'/*.sh"
+
 echo "== foreign file =="
 H2="$T/home2"; mkdir -p "$H2"; printf '#!/bin/bash\n# precious production script\necho prod\n' > "$H2/start-windows.sh"; chmod 755 "$H2/start-windows.sh"
 orig="$(md5sum < "$H2/start-windows.sh")"
@@ -48,7 +58,7 @@ check "exit 0" test "$rc" = 0
 check "timestamped backup exists and is non-empty" test -n "$bak" -a -s "$bak"
 check "backup is byte-identical to the original" test "$orig" = "$(md5sum < "$bak")"
 check "backup keeps the executable bit" test -x "$bak"
-check "new launcher installed afterwards" grep -qxF "# homelab-gpu-workstation launcher" "$H2/start-windows.sh"
+check "new launcher installed afterwards" grep -qxF "# rtx-on-demand launcher" "$H2/start-windows.sh"
 check "output says the backup was verified" bash -c "printf '%s' '$out' | grep -q 'verified'"
 
 echo "== --force with a foreign symlink =="

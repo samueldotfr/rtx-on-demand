@@ -40,7 +40,7 @@ Always start with `scripts/status.sh` (read-only). Commands marked `sudo` change
 - **Symptom:** A function binds to the wrong driver after a transition, or the status says INCONSISTENT with override set.
 - **Cause / possible causes:** A previous attempt was interrupted after writing `driver_override`.
 - **How to verify:** `cat /sys/bus/pci/devices/<addr>/driver_override`.
-- **Fix:** With Windows stopped: `sudo scripts/gpu-to-linux.sh` (clears it). Manual: unbind, `: > driver_override`, `echo <addr> > /sys/bus/pci/drivers_probe`.
+- **Fix:** With Windows stopped: `sudo scripts/gpu-to-linux.sh` (clears it). Manual: unbind, `echo > /sys/bus/pci/devices/<addr>/driver_override` (a bare newline; `: >` sends no write and does nothing), check it reads `(null)`, then `echo <addr> > /sys/bus/pci/drivers_probe`.
 - **Do not confuse with:** `(null)` is the normal empty value.
 
 ## QEMU still holds /dev/vfio

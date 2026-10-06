@@ -2,9 +2,10 @@
 
 ## Reporting a vulnerability
 
-Please do **not** open a public issue for a security problem. Use the "Report a vulnerability"
-feature of the hosting platform's Security tab (private advisory) once the repository is
-published. Include the affected script or document and steps to reproduce.
+Please do **not** open a public issue for a security problem. Use GitHub's private vulnerability
+reporting ("Report a vulnerability" in the Security tab of
+[samueldotfr/rtx-on-demand](https://github.com/samueldotfr/rtx-on-demand)). Include the affected
+script or document and steps to reproduce.
 
 ## Scope and threat model
 
