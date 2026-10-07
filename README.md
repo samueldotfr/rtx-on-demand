@@ -1,5 +1,7 @@
 # RTX on Demand
 
+![RTX on Demand: one RTX in a Linux home server, CUDA and local AI by default, Windows gaming and creative apps on demand, one owner at a time](docs/images/rtx-on-demand-hero.webp)
+
 ### One RTX in your home server: Linux compute by default, a Windows gaming PC or workstation when someone asks for it.
 
 ```text
@@ -24,13 +26,7 @@ back when Windows stops.
 
 At any moment the RTX has exactly **one** owner. It is never shared between Linux and Windows at the same time.
 
-```text
-   Linux owns the RTX                    Windows owns the RTX
-   CUDA, AI, containers                  gaming, Photoshop, GPU apps
-          |                                        |
-          |   ~/start-windows.sh                   |   ~/stop-windows.sh
-          +-------------> VFIO parked ------------>+------------> back to Linux
-```
+![GPU handoff: Linux owns the RTX (nvidia), it is parked on vfio-pci, the Windows VM gets it through passthrough, then it returns to nvidia and snd_hda_intel](docs/images/rtx-on-demand-gpu-handoff.webp)
 
 - **Normally:** Linux owns the RTX (NVIDIA driver, CUDA, containers).
 - **On demand:** the card is handed to `vfio-pci`, and a Windows VM starts with the real GPU passed through.
@@ -250,8 +246,8 @@ Screenshots are still placeholders, see [assets/README.md](assets/README.md).
 
 ## Project status
 
-Early (v0.1). Works on one reference machine. The scripts are in daily use on it (maintainer-reported), and
-hardware-free mock tests (`tests/`) pass. The reboot/crash matrix is still incomplete. Untested: Intel hosts, AMD
+Early (v0.1). Works on one reference machine. A full Linux → Windows → Linux cycle has been validated on the
+reference system, and hardware-free mock tests (`tests/`) pass. The reboot/crash matrix is still incomplete. Untested: Intel hosts, AMD
 GPUs, other distros, other gamepads, TV-box clients, multi-GPU hosts. See [docs/known-issues.md](docs/known-issues.md).
 
 ## License

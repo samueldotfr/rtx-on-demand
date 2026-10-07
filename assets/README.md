@@ -14,4 +14,8 @@ Wanted (contributions welcome, see CONTRIBUTING.md):
 | `joy-cpl-remote.png` | joy.cpl in the remote Windows showing the virtual controller |
 
 Before adding an image, crop or blur: hostnames, usernames, LAN addresses, MAC addresses,
-serial numbers, license keys, Sunshine device names and pairing PINs. Keep files small (<1 MB each).
+serial numbers, license keys, Sunshine device names and pairing PINs.
+
+Format and size: use WebP for illustrations and screenshots when it cuts the size significantly with no
+visible loss; keep PNG when a lossless copy or its metadata matters. Stay under 1 MB per file when reasonably
+possible, but text and diagrams must remain perfectly readable.
