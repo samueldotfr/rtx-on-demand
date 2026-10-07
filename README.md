@@ -92,6 +92,12 @@ An Xbox controller connected to the Moonlight client was validated on the refere
 [docs/gamepad.md](docs/gamepad.md)). A TV box or handheld as the client is plausible but **untested here**: the
 reference tests used a laptop client.
 
+## File transfer
+
+Files can be copied directly to the Windows guest over SSH/SCP, which is useful for installers, game files, assets
+or other large transfers, with no network share or cloud storage. This is plain OpenSSH inside the guest, not a
+feature of this project, and it is independent of Moonlight. See [Transfer files with SCP](docs/file-transfer.md).
+
 ## Architecture
 
 The RTX goes either to Linux or to the Windows VM. The two branches below are alternatives over time, not
@@ -227,7 +233,7 @@ More in [docs/performance.md](docs/performance.md) and [docs/reference-build.md]
 [Host setup](docs/host-setup.md) · [IOMMU & VFIO](docs/iommu-and-vfio.md) ·
 [Windows VM](docs/windows-vm.md) · [Windows LTSC](docs/windows-ltsc.md) ·
 [Virtual display](docs/virtual-display.md) · [Sunshine](docs/sunshine.md) ·
-[Moonlight](docs/moonlight.md) · [Audio](docs/audio.md) · [Gamepad](docs/gamepad.md) ·
+[Moonlight](docs/moonlight.md) · [File transfer](docs/file-transfer.md) · [Audio](docs/audio.md) · [Gamepad](docs/gamepad.md) ·
 [GPU handoff](docs/gpu-handoff.md) · [State machine](docs/state-machine.md) ·
 [Performance](docs/performance.md) · [Security](docs/security.md) ·
 [Reference build](docs/reference-build.md)
